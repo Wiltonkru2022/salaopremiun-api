@@ -51,6 +51,10 @@ function contextFromQuery(query: AnyRecord) {
   };
 }
 
+function isHealthCheckContext(context: { idSalao: string; idProfissional: string }) {
+  return context.idSalao === "health-check" || context.idProfissional === "health-check";
+}
+
 function requireProfessionalContext(payload: AnyRecord) {
   const context = contextFromPayload(payload);
   if (!context.idSalao || !context.idProfissional) {
@@ -251,6 +255,9 @@ export async function registerProfessionalAppRoutes(app: FastifyInstance) {
     if (!requireAdminToken(request, reply)) return;
     const query = (request.query || {}) as AnyRecord;
     const context = contextFromQuery(query);
+    if (isHealthCheckContext(context)) {
+      return { ok: true, service: config.serviceName, provider: "oracle-vps", healthCheck: true, items: [] };
+    }
     if (!context.idSalao || !context.idProfissional) {
       return reply.code(400).send({ ok: false, error: "Contexto do profissional obrigatório." });
     }
@@ -270,6 +277,17 @@ export async function registerProfessionalAppRoutes(app: FastifyInstance) {
   app.get("/app-profissional/resumo", async (request, reply) => {
     if (!requireAdminToken(request, reply)) return;
     const context = contextFromQuery((request.query || {}) as AnyRecord);
+    if (isHealthCheckContext(context)) {
+      return {
+        ok: true,
+        service: config.serviceName,
+        provider: "oracle-vps",
+        healthCheck: true,
+        profissional: null,
+        agendaHoje: [],
+        resumo: { agendaHoje: 0, vendidoMes: 0, comissaoMes: 0 },
+      };
+    }
     if (!context.idSalao || !context.idProfissional) {
       return reply.code(400).send({ ok: false, error: "Contexto do profissional obrigatório." });
     }
