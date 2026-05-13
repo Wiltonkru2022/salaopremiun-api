@@ -31,6 +31,13 @@ npm start
 docker compose up -d --build
 ```
 
+Se estiver preservando uma pasta `data` antiga na VPS, ajuste a permissao para o usuario `node` do container:
+
+```bash
+sudo chown -R 1000:1000 data
+docker restart salaopremium-api
+```
+
 No Nginx Proxy Manager:
 
 ```text
