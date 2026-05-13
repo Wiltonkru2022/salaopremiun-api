@@ -4,7 +4,9 @@ import { config } from "./config.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerMonitoringRoutes } from "./routes/monitoring.js";
 import { registerOperationRoutes } from "./routes/operations.js";
+import { registerClientAppRoutes } from "./routes/clientApp.js";
 import { registerPublicRoutes } from "./routes/public.js";
+import { registerProfessionalAppRoutes } from "./routes/professionalApp.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 
 export function buildServer() {
@@ -29,6 +31,8 @@ export function buildServer() {
   app.register(registerMonitoringRoutes);
   app.register(registerWebhookRoutes);
   app.register(registerOperationRoutes);
+  app.register(registerClientAppRoutes);
+  app.register(registerProfessionalAppRoutes);
 
   return app;
 }
