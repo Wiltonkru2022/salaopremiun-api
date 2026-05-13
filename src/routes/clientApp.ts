@@ -179,7 +179,7 @@ function buildSlots(params: {
 async function canSalonAppear(idSalao: string) {
   const { data, error } = await getAdminClient()
     .from("saloes")
-    .select("id,status,plano,trial_ativo,app_cliente_pausado")
+    .select("id,status,plano,trial_ativo,app_cliente_publicado,app_cliente_pausado")
     .eq("id", idSalao)
     .limit(1)
     .maybeSingle();
@@ -187,6 +187,7 @@ async function canSalonAppear(idSalao: string) {
   throwIfSupabaseError(error, "Falha ao validar salão");
   if (!data?.id) return false;
   if (String(data.status || "").toLowerCase() !== "ativo") return false;
+  if (data.app_cliente_publicado === false) return false;
   if (data.app_cliente_pausado === true) return false;
   return Boolean(data.trial_ativo || ["pro", "premium"].includes(String(data.plano || "").toLowerCase()));
 }
@@ -344,10 +345,11 @@ export async function registerClientAppRoutes(app: FastifyInstance) {
     const supabase = getAdminClient();
     let builder = supabase
       .from("saloes")
-      .select("id,nome,status,plano,trial_ativo,cidade,bairro,endereco,numero,telefone,whatsapp,latitude,longitude,slug_publico,logo_url,foto_capa_url,app_cliente_pausado,motivo_pausa_app_cliente,descricao_publica,created_at")
+      .select("id,nome,nome_fantasia,status,plano,trial_ativo,cidade,bairro,endereco,numero,cep,telefone,whatsapp,latitude,longitude,app_cliente_slug,logo_url,foto_capa_url,app_cliente_publicado,app_cliente_pausado,app_cliente_pausa_mensagem,descricao_publica,created_at")
       .eq("status", "ativo")
+      .eq("app_cliente_publicado", true)
+      .eq("app_cliente_pausado", false)
       .or("trial_ativo.eq.true,plano.in.(pro,premium)")
-      .neq("app_cliente_pausado", true)
       .order("nome", { ascending: true })
       .limit(limitFromQuery(query));
 
@@ -365,8 +367,8 @@ export async function registerClientAppRoutes(app: FastifyInstance) {
     const supabase = getAdminClient();
     const { data, error } = await supabase
       .from("saloes")
-      .select("id,nome,status,plano,trial_ativo,cidade,bairro,endereco,numero,telefone,whatsapp,latitude,longitude,slug_publico,logo_url,foto_capa_url,app_cliente_pausado,motivo_pausa_app_cliente,descricao_publica,created_at")
-      .or(`id.eq.${id},slug_publico.eq.${id}`)
+      .select("id,nome,nome_fantasia,status,plano,trial_ativo,cidade,bairro,endereco,numero,cep,telefone,whatsapp,latitude,longitude,app_cliente_slug,logo_url,foto_capa_url,app_cliente_publicado,app_cliente_pausado,app_cliente_pausa_mensagem,descricao_publica,created_at")
+      .or(`id.eq.${id},app_cliente_slug.eq.${id}`)
       .limit(1)
       .maybeSingle();
     throwIfSupabaseError(error, "Falha ao carregar salão");
@@ -415,7 +417,7 @@ export async function registerClientAppRoutes(app: FastifyInstance) {
 
     let builder = supabase
       .from("agendamentos")
-      .select("id,id_salao,cliente_id,profissional_id,servico_id,data,hora_inicio,hora_fim,status,origem,created_at,clientes(nome),profissionais(nome,nome_exibicao),servicos(nome,preco,duracao_minutos),saloes(nome,logo_url,slug_publico)")
+      .select("id,id_salao,cliente_id,profissional_id,servico_id,data,hora_inicio,hora_fim,status,origem,created_at,clientes(nome),profissionais(nome,nome_exibicao),servicos(nome,preco,duracao_minutos),saloes(nome,logo_url,app_cliente_slug)")
       .order("data", { ascending: false })
       .order("hora_inicio", { ascending: false })
       .limit(limitFromQuery(query, 10, 50));
