@@ -20,6 +20,7 @@ export const files = {
   webhooks: path.join(config.dataDir, "webhooks.ndjson"),
   caixa: path.join(config.dataDir, "caixa.ndjson"),
   comissoes: path.join(config.dataDir, "comissoes.ndjson"),
+  vendas: path.join(config.dataDir, "vendas.ndjson"),
 };
 
 export function now() {
@@ -94,3 +95,5 @@ export function countBy<T>(items: T[], keyFn: (item: T) => string | null | undef
     return acc;
   }, {});
 }
+
+
