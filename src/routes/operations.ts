@@ -65,18 +65,20 @@ function sumNestedItems(comandas: AnyRecord[]) {
     return nested.map((item) => ({ ...item, id_comanda: comanda.id, status_comanda: comanda.status }) as AnyRecord);
   });
 
+  const tipoItem = (item: AnyRecord) => String(item.tipo || (item.id_profissional ? "servico" : "item")).toLowerCase();
+
   return {
     totalItens: items.length,
-    servicos: items.filter((item) => String(item.tipo || "").toLowerCase() === "servico").length,
-    produtos: items.filter((item) => String(item.tipo || "").toLowerCase() === "produto").length,
-    extras: items.filter((item) => String(item.tipo || "").toLowerCase() === "extra").length,
+    servicos: items.filter((item) => tipoItem(item) === "servico").length,
+    produtos: items.filter((item) => tipoItem(item) === "produto").length,
+    extras: items.filter((item) => tipoItem(item) === "extra").length,
     rankingServicos: sumBy(
-      items.filter((item) => String(item.tipo || "").toLowerCase() === "servico"),
+      items.filter((item) => tipoItem(item) === "servico"),
       "descricao",
       "valor_total",
     ).slice(0, 20),
     rankingProdutos: sumBy(
-      items.filter((item) => String(item.tipo || "").toLowerCase() === "produto"),
+      items.filter((item) => tipoItem(item) === "produto"),
       "descricao",
       "valor_total",
     ).slice(0, 20),
