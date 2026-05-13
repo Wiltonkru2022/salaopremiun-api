@@ -102,8 +102,8 @@ async function listNotifications(query: AnyRecord) {
         text(evento.descricao, 300) ||
         `O salão ${nomeSalao} redefiniu sua senha de acesso ao app profissional.`,
       createdAt: text(evento.criado_em) || null,
-      actionLabel: numeroTicket ? `Ticket #${numeroTicket}` : "Ver suporte",
-      href: "/app-profissional/suporte",
+      actionLabel: numeroTicket ? `Ticket #${numeroTicket}` : "Ver notificação",
+      href: `/app-profissional/notificacoes?notificacao=${encodeURIComponent(text(evento.id))}`,
     };
   });
 }
