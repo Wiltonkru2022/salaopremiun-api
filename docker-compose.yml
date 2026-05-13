@@ -1,0 +1,19 @@
+services:
+  salaopremiun-api:
+    build: .
+    container_name: salaopremiun-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /data
+      PORT: 8080
+      HOST: 0.0.0.0
+    volumes:
+      - ./data:/data
+    networks:
+      - proxy_default
+
+networks:
+  proxy_default:
+    external: true

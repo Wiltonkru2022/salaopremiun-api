@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.env.local
+data/
+*.log
+*.tgz
+data-smoke/
