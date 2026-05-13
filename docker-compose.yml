@@ -1,7 +1,7 @@
 services:
-  salaopremiun-api:
+  salaopremium-api:
     build: .
-    container_name: salaopremiun-api
+    container_name: salaopremium-api
     restart: unless-stopped
     env_file:
       - .env

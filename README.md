@@ -36,7 +36,7 @@ No Nginx Proxy Manager:
 ```text
 Domain: api.salaopremiun.com.br
 Scheme: http
-Forward Hostname/IP: salaopremiun-api
+Forward Hostname/IP: salaopremium-api
 Forward Port: 8080
 SSL: ativo
 Force SSL: ativo
