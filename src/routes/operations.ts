@@ -1,7 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { config } from "../config.js";
 import { requireAdminToken } from "../lib/auth.js";
-import { appendNdjson, createJob, files, readNdjson } from "../lib/store.js";
+import { findSubscriptionsForNotification, sendPushToRows, type NotificationJobRow } from "../lib/push.js";
+import { appendNdjson, compactAllNdjsonFiles, createJob, createReprocessJob, files, readNdjson } from "../lib/store.js";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 
 type AnyRecord = Record<string, unknown>;
@@ -58,6 +59,30 @@ function sumBy(items: AnyRecord[], groupKey: string, valueKey: string): Array<{ 
     .sort((a, b) => b.total - a.total);
 }
 
+function sumNestedItems(comandas: AnyRecord[]) {
+  const items = comandas.flatMap((comanda) => {
+    const nested = Array.isArray(comanda.comanda_itens) ? (comanda.comanda_itens as AnyRecord[]) : [];
+    return nested.map((item) => ({ ...item, id_comanda: comanda.id, status_comanda: comanda.status }) as AnyRecord);
+  });
+
+  return {
+    totalItens: items.length,
+    servicos: items.filter((item) => String(item.tipo || "").toLowerCase() === "servico").length,
+    produtos: items.filter((item) => String(item.tipo || "").toLowerCase() === "produto").length,
+    extras: items.filter((item) => String(item.tipo || "").toLowerCase() === "extra").length,
+    rankingServicos: sumBy(
+      items.filter((item) => String(item.tipo || "").toLowerCase() === "servico"),
+      "descricao",
+      "valor_total",
+    ).slice(0, 20),
+    rankingProdutos: sumBy(
+      items.filter((item) => String(item.tipo || "").toLowerCase() === "produto"),
+      "descricao",
+      "valor_total",
+    ).slice(0, 20),
+  };
+}
+
 function limitFromQuery(query: PeriodQuery, fallback = 500, max = 1000): number {
   const parsed = Number(query.limit || fallback);
   return Math.min(Number.isFinite(parsed) && parsed > 0 ? parsed : fallback, max);
@@ -109,7 +134,7 @@ async function fetchComandas(idSalao: string, query: PeriodQuery, dateColumn = "
   const period = getPeriod(query);
   let builder = supabase
     .from("comandas")
-    .select("id,id_salao,numero,status,subtotal,desconto,acrescimo,total,aberta_em,fechada_em,cancelada_em,created_at,updated_at")
+    .select("id,id_salao,numero,status,subtotal,desconto,acrescimo,total,aberta_em,fechada_em,cancelada_em,created_at,updated_at,comanda_itens(id,tipo,descricao,quantidade,valor_unitario,valor_total,id_profissional)")
     .eq("id_salao", idSalao)
     .gte(dateColumn, period.inicio)
     .lte(dateColumn, period.fim)
@@ -210,6 +235,90 @@ function buildComissoesResumo(comissoes: AnyRecord[]) {
     porStatus: countBy(comissoes, "status"),
     porProfissional: sumBy(comissoes, "id_profissional", "valor_comissao").slice(0, 20),
   };
+}
+
+async function markNotificationJob(
+  id: string,
+  status: "processando" | "enviada" | "falhou",
+  extra?: Record<string, unknown>,
+) {
+  await getAdminClient()
+    .from("notification_jobs")
+    .update({
+      status,
+      updated_at: new Date().toISOString(),
+      ...(extra || {}),
+    })
+    .eq("id", id);
+}
+
+async function processNotificationJobs(limit: number) {
+  const supabase = getAdminClient();
+  const { data, error } = await supabase
+    .from("notification_jobs")
+    .select("id,id_salao,id_cliente,id_profissional,cliente_app_conta_id,canal,tipo,titulo,mensagem,url,tag,status,enviar_em,tentativas,idempotency_key")
+    .eq("status", "pendente")
+    .lte("enviar_em", new Date().toISOString())
+    .order("enviar_em", { ascending: true })
+    .limit(limit);
+
+  throwIfSupabaseError(error, "Falha ao buscar notificações pendentes");
+
+  const rows = (data || []) as NotificationJobRow[];
+  let processed = 0;
+  let sent = 0;
+  let failed = 0;
+  let inactive = 0;
+
+  for (const job of rows) {
+    const lock = await supabase
+      .from("notification_jobs")
+      .update({
+        status: "processando",
+        tentativas: Number(job.tentativas || 0) + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.id)
+      .eq("status", "pendente")
+      .select("id")
+      .maybeSingle();
+
+    if (lock.error || !lock.data?.id) continue;
+
+    try {
+      const subscriptions = await findSubscriptionsForNotification(job);
+      const result = await sendPushToRows(subscriptions, {
+        title: job.titulo,
+        body: job.mensagem,
+        url: job.url || "/",
+        tag: job.tag || job.idempotency_key || job.id,
+      });
+
+      await markNotificationJob(job.id, "enviada", {
+        enviada_em: new Date().toISOString(),
+        sent_count: result.sent,
+        erro_texto: null,
+      });
+      appendNdjson(files.notifications, {
+        type: "notifications:processed",
+        status: "sent",
+        id_notification_job: job.id,
+        sent: result.sent,
+        failed: result.failed,
+        inactive: result.inactive,
+      });
+      processed += 1;
+      sent += result.sent;
+      inactive += result.inactive;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erro ao enviar notificação.";
+      await markNotificationJob(job.id, "falhou", { erro_texto: message });
+      createReprocessJob("notification", { id: job.id, job }, message);
+      failed += 1;
+    }
+  }
+
+  return { processed, sent, failed, inactive, scanned: rows.length };
 }
 
 export async function registerOperationRoutes(app: FastifyInstance) {
@@ -349,6 +458,7 @@ export async function registerOperationRoutes(app: FastifyInstance) {
       id_salao: idSalao,
       periodo: comandasData.period,
       resumo: buildVendasResumo(comandasData.rows, pagamentos),
+      itens: sumNestedItems(comandasData.rows),
       items: comandasData.rows.slice(0, 100),
       generatedAt: new Date().toISOString(),
     };
@@ -359,7 +469,7 @@ export async function registerOperationRoutes(app: FastifyInstance) {
     const query = (request.query || {}) as PeriodQuery;
     const idSalao = requireSalao(query as AnyRecord);
     const [comandasData, pagamentos] = await Promise.all([fetchComandas(idSalao, query), fetchPagamentos(idSalao, query)]);
-    return { ok: true, service: config.serviceName, resumo: buildVendasResumo(comandasData.rows, pagamentos) };
+    return { ok: true, service: config.serviceName, resumo: buildVendasResumo(comandasData.rows, pagamentos), itens: sumNestedItems(comandasData.rows) };
   });
 
   app.get("/relatorio-financeiro", async (request, reply) => {
@@ -380,6 +490,7 @@ export async function registerOperationRoutes(app: FastifyInstance) {
       id_salao: idSalao,
       periodo: comandasData.period,
       vendas,
+      itens: sumNestedItems(comandasData.rows),
       comissoes: comissoesResumo,
       caixa: {
         totalMovimentado: sum(movimentacoes, "valor"),
@@ -452,17 +563,9 @@ export async function registerOperationRoutes(app: FastifyInstance) {
     if (!requireAdminToken(request, reply)) return;
     const payload = asRecord(request.body);
     const limit = Math.min(toNumber(payload.limit || 50), 100);
-    const supabase = getAdminClient();
-    const { data, error } = await supabase
-      .from("notification_jobs")
-      .select("id,id_salao,canal,tipo,status,enviar_em,tentativas")
-      .eq("status", "pendente")
-      .lte("enviar_em", new Date().toISOString())
-      .order("enviar_em", { ascending: true })
-      .limit(limit);
-    throwIfSupabaseError(error, "Falha ao buscar notificações pendentes");
-    const job = createJob("notifications:process", { requested: payload, pending: data || [] }, "completed");
-    return reply.code(202).send({ ok: true, service: config.serviceName, job, pendentes: data || [], total: (data || []).length });
+    const result = await processNotificationJobs(limit);
+    const job = createJob("notifications:process", { requested: payload, result }, "completed");
+    return reply.code(202).send({ ok: true, service: config.serviceName, job, ...result });
   });
 
   app.post("/backup/executar", async (request, reply) => {
@@ -480,5 +583,23 @@ export async function registerOperationRoutes(app: FastifyInstance) {
     const job = createJob("backup:metadata", { mode: payload.mode || "metadata_only", counts }, "completed");
     appendNdjson(files.backups, { type: "backup:metadata", status: "completed", counts });
     return reply.code(202).send({ ok: true, service: config.serviceName, job, backup: { mode: "metadata_only", counts, generatedAt: new Date().toISOString() } });
+  });
+
+  app.get("/backup", async (request, reply) => {
+    if (!requireAdminToken(request, reply)) return;
+    return { ok: true, service: config.serviceName, items: readNdjson(files.backups, 20) };
+  });
+
+  app.post("/jobs/cleanup", async (request, reply) => {
+    if (!requireAdminToken(request, reply)) return;
+    const result = compactAllNdjsonFiles();
+    const job = createJob("cleanup:ndjson", { result }, "completed");
+    appendNdjson(files.cleanup, { type: "cleanup:ndjson", status: "completed", result });
+    return reply.code(202).send({ ok: true, service: config.serviceName, job, result });
+  });
+
+  app.get("/admin/reprocess", async (request, reply) => {
+    if (!requireAdminToken(request, reply)) return;
+    return { ok: true, service: config.serviceName, items: readNdjson(files.reprocess, 100) };
   });
 }

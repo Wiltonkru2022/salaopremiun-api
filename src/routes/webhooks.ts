@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 import { requireAdminToken, requireAsaasWebhookToken } from "../lib/auth.js";
-import { appendNdjson, files } from "../lib/store.js";
+import { processAsaasWebhookOfficial } from "../lib/asaas.js";
+import { appendNdjson, createReprocessJob, files, readNdjson } from "../lib/store.js";
 
 export async function registerWebhookRoutes(app: FastifyInstance) {
   app.post("/webhooks/internal", async (request, reply) => {
@@ -17,19 +18,47 @@ export async function registerWebhookRoutes(app: FastifyInstance) {
 
   app.get("/admin/webhooks", async (request, reply) => {
     if (!requireAdminToken(request, reply)) return;
-    return { ok: true, service: config.serviceName, items: [] };
+    return { ok: true, service: config.serviceName, items: readNdjson(files.webhooks, 100) };
   });
 
   app.post("/webhooks/asaas", async (request, reply) => {
     if (!requireAsaasWebhookToken(request, reply)) return;
-    const event = appendNdjson(files.webhooks, {
+    const payload = (request.body || {}) as Record<string, unknown>;
+    const saved = appendNdjson(files.webhooks, {
       provider: "asaas",
-      status: "received_only",
-      note: "Recebido em modo espelho. O caminho oficial so deve mudar apos validacao.",
-      payload: request.body || null,
+      status: "processing",
+      payload,
       ip: request.ip,
     });
-    return reply.code(202).send({ ok: true, service: config.serviceName, provider: "asaas", received: true, id: event.id });
+
+    try {
+      const result = await processAsaasWebhookOfficial(payload);
+      appendNdjson(files.webhooks, {
+        provider: "asaas",
+        status: "processed",
+        sourceEventId: saved.id,
+        result,
+      });
+      return reply.code(200).send({ ok: true, service: config.serviceName, provider: "asaas", id: saved.id, result });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Falha ao processar webhook Asaas.";
+      const retry = createReprocessJob("asaas:webhook", payload, message);
+      appendNdjson(files.webhooks, {
+        provider: "asaas",
+        status: "failed",
+        sourceEventId: saved.id,
+        error: message,
+        retryJobId: retry.id,
+      });
+      return reply.code(202).send({
+        ok: false,
+        service: config.serviceName,
+        provider: "asaas",
+        queuedForRetry: true,
+        retryJobId: retry.id,
+        error: message,
+      });
+    }
   });
 
   app.post("/webhooks/resend", async (request, reply) => {

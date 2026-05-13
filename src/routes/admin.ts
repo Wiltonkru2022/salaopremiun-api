@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import fs from "node:fs";
 import { config } from "../config.js";
 import { requireAdminToken } from "../lib/auth.js";
-import { countBy, createJob, files, readNdjson } from "../lib/store.js";
+import { compactAllNdjsonFiles, countBy, createJob, files, readNdjson } from "../lib/store.js";
 import { systemStatus } from "../lib/system.js";
 
 function limitFromQuery(request: FastifyRequest, fallback = 20, max = 100) {
@@ -89,6 +89,22 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const params = request.params as { id: string };
     const job = createJob("notifications:retry", { retryOf: params.id }, "completed");
     return reply.code(202).send({ ok: true, service: config.serviceName, retry: job });
+  });
+
+  app.post("/admin/reprocess/:id/retry", async (request, reply) => {
+    if (!requireAdminToken(request, reply)) return;
+    const params = request.params as { id: string };
+    const reprocessItems = readNdjson(files.reprocess, config.maxNdjsonLines);
+    const original = reprocessItems.find((item) => item.id === params.id || item.jobId === params.id);
+    const job = createJob("reprocess:retry", { retryOf: params.id, original: original || null }, "queued");
+    return reply.code(202).send({ ok: true, service: config.serviceName, retry: job });
+  });
+
+  app.post("/admin/cleanup", async (request, reply) => {
+    if (!requireAdminToken(request, reply)) return;
+    const result = compactAllNdjsonFiles();
+    const job = createJob("cleanup:manual", { result, requested: request.body || null }, "completed");
+    return reply.code(202).send({ ok: true, service: config.serviceName, job, result });
   });
 
   app.post("/jobs/reports/generate", async (request, reply) => {
