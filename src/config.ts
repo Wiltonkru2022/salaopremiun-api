@@ -16,6 +16,10 @@ export const config = {
   asaasApiKey: process.env.ASAAS_API_KEY || "",
   asaasWebhookToken: process.env.ASAAS_WEBHOOK_TOKEN || "",
   resendApiKey: process.env.RESEND_API_KEY || "",
-  webPushPrivateKey: process.env.WEB_PUSH_VAPID_PRIVATE_KEY || "",
-  webPushPublicKey: process.env.NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY || "",
+  webPushPrivateKey:
+    process.env.WEB_PUSH_PRIVATE_KEY || process.env.WEB_PUSH_VAPID_PRIVATE_KEY || "",
+  webPushPublicKey:
+    process.env.WEB_PUSH_PUBLIC_KEY ||
+    process.env.NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY ||
+    "",
 };
