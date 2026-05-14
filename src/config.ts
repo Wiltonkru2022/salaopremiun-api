@@ -13,6 +13,10 @@ export const config = {
   supabaseUrl: process.env.SUPABASE_URL || "",
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY || "",
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+  securitySupabaseUrl: process.env.SECURITY_SUPABASE_URL || "",
+  securitySupabaseServiceRoleKey:
+    process.env.SECURITY_SUPABASE_SERVICE_ROLE_KEY || "",
+  securityEventsTable: process.env.SECURITY_EVENTS_TABLE || "security_events",
   asaasApiKey: process.env.ASAAS_API_KEY || "",
   asaasWebhookToken: process.env.ASAAS_WEBHOOK_TOKEN || "",
   resendApiKey: process.env.RESEND_API_KEY || "",

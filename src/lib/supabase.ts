@@ -17,3 +17,23 @@ export function getSupabaseAdmin() {
     },
   });
 }
+
+export function getSecuritySupabaseAdmin() {
+  if (!config.securitySupabaseUrl || !config.securitySupabaseServiceRoleKey) {
+    return null;
+  }
+
+  return createClient(
+    config.securitySupabaseUrl,
+    config.securitySupabaseServiceRoleKey,
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+      realtime: {
+        transport: WebSocket as any,
+      },
+    }
+  );
+}

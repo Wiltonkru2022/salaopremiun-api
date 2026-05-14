@@ -92,6 +92,9 @@ ASAAS_WEBHOOK_TOKEN=
 RESEND_API_KEY=
 WEB_PUSH_VAPID_PRIVATE_KEY=
 NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY=
+SECURITY_SUPABASE_URL=
+SECURITY_SUPABASE_SERVICE_ROLE_KEY=
+SECURITY_EVENTS_TABLE=security_events
 ```
 
 No projeto principal da Vercel, use:
@@ -102,6 +105,36 @@ ORACLE_VPS_API_TOKEN=
 ```
 
 `ORACLE_VPS_API_TOKEN` precisa ser exatamente o mesmo valor de `API_ADMIN_TOKEN` na VPS.
+
+### Supabase separado para segurança
+
+Para manter logs de segurança fora do banco principal, configure `SECURITY_SUPABASE_URL`, `SECURITY_SUPABASE_SERVICE_ROLE_KEY` e `SECURITY_EVENTS_TABLE` na VPS. A tabela esperada é:
+
+```sql
+create table if not exists public.security_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid null,
+  id_salao uuid null,
+  tipo_usuario text null,
+  evento text not null,
+  risco text not null default 'baixo',
+  ip text null,
+  user_agent text null,
+  detalhes jsonb not null default '{}',
+  criado_em timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists idx_security_events_criado_em
+  on public.security_events (criado_em desc);
+
+create index if not exists idx_security_events_salao
+  on public.security_events (id_salao, criado_em desc)
+  where id_salao is not null;
+
+create index if not exists idx_security_events_usuario
+  on public.security_events (user_id, criado_em desc)
+  where user_id is not null;
+```
 
 ## Desenvolvimento Local
 
@@ -246,6 +279,7 @@ GET  /admin/reports/jobs
 
 ```text
 POST /monitoring/event
+POST /monitoring/security-event
 GET  /admin/monitoring/summary
 GET  /admin/monitoring/errors
 GET  /admin/monitoring/performance
@@ -258,7 +292,10 @@ Uso esperado:
 - falhas de webhook;
 - falhas de cron;
 - falhas de notificação;
+- eventos de login, bloqueio e verificação de segurança;
 - alertas da VPS para o Admin Master.
+
+Se `SECURITY_SUPABASE_URL` e `SECURITY_SUPABASE_SERVICE_ROLE_KEY` estiverem configurados, a API tenta persistir os eventos de segurança no Supabase separado. Caso nao estejam, o fallback fica nos NDJSON locais da VPS.
 
 ## Webhooks
 

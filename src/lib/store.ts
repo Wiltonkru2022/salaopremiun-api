@@ -17,6 +17,7 @@ export const files = {
   notifications: path.join(config.dataDir, "notifications.ndjson"),
   reports: path.join(config.dataDir, "reports.ndjson"),
   monitoring: path.join(config.dataDir, "monitoring.ndjson"),
+  security: path.join(config.dataDir, "security.ndjson"),
   webhooks: path.join(config.dataDir, "webhooks.ndjson"),
   caixa: path.join(config.dataDir, "caixa.ndjson"),
   comissoes: path.join(config.dataDir, "comissoes.ndjson"),
