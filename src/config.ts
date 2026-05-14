@@ -16,6 +16,12 @@ export const config = {
   asaasApiKey: process.env.ASAAS_API_KEY || "",
   asaasWebhookToken: process.env.ASAAS_WEBHOOK_TOKEN || "",
   resendApiKey: process.env.RESEND_API_KEY || "",
+  trialAlertEmailFrom:
+    process.env.TRIAL_ALERT_EMAIL_FROM ||
+    process.env.CADASTRO_SALAO_EMAIL_FROM ||
+    "SalaoPremium <boasvindas@salaopremiun.com.br>",
+  appBaseUrl: process.env.APP_BASE_URL || "https://painel.salaopremiun.com.br",
+  supportWhatsapp: process.env.SUPPORT_WHATSAPP || "5567984341742",
   webPushPrivateKey:
     process.env.WEB_PUSH_PRIVATE_KEY || process.env.WEB_PUSH_VAPID_PRIVATE_KEY || "",
   webPushPublicKey:

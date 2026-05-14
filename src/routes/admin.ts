@@ -4,6 +4,7 @@ import { config } from "../config.js";
 import { requireAdminToken } from "../lib/auth.js";
 import { compactAllNdjsonFiles, countBy, createJob, files, readNdjson } from "../lib/store.js";
 import { systemStatus } from "../lib/system.js";
+import { extendTrial, processTrialAlerts, sendTrialAlertNow } from "../lib/trialAlerts.js";
 
 function limitFromQuery(request: FastifyRequest, fallback = 20, max = 100) {
   const query = request.query as { limit?: string } | undefined;
@@ -80,6 +81,32 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     if (!requireAdminToken(request, reply)) return;
     const jobs = readNdjson(files.jobs, limitFromQuery(request)).filter((item) =>
       String(item.type).startsWith("notifications:"),
+    );
+    return { ok: true, service: config.serviceName, items: jobs };
+  });
+
+  app.post("/jobs/trial-alerts/process", async (request, reply) => {
+    if (!requireAdminToken(request, reply)) return;
+    const result = await processTrialAlerts((request.body || {}) as Record<string, unknown>);
+    return reply.code(202).send(result);
+  });
+
+  app.post("/trial-alerts/send-now", async (request, reply) => {
+    if (!requireAdminToken(request, reply)) return;
+    const result = await sendTrialAlertNow((request.body || {}) as Record<string, unknown>);
+    return reply.code(202).send(result);
+  });
+
+  app.post("/trial-alerts/extend", async (request, reply) => {
+    if (!requireAdminToken(request, reply)) return;
+    const result = await extendTrial((request.body || {}) as Record<string, unknown>);
+    return reply.code(202).send(result);
+  });
+
+  app.get("/admin/trial-alerts/jobs", async (request, reply) => {
+    if (!requireAdminToken(request, reply)) return;
+    const jobs = readNdjson(files.jobs, limitFromQuery(request)).filter((item) =>
+      String(item.type || "").startsWith("trial-alerts:"),
     );
     return { ok: true, service: config.serviceName, items: jobs };
   });
