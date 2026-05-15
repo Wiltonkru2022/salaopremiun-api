@@ -2,7 +2,7 @@
 
 API auxiliar do SalaoPremium para Oracle VPS. Ela não substitui Vercel nem Supabase; serve como braço de processamento para jobs, monitoramento, relatórios, webhooks, notificações e cálculos que podem rodar fora do frontend principal.
 
-Última atualização: 14/05/2026.
+Última atualização: 15/05/2026.
 
 ## Papel da API
 
@@ -135,6 +135,19 @@ create index if not exists idx_security_events_usuario
   on public.security_events (user_id, criado_em desc)
   where user_id is not null;
 ```
+
+Rotas de segurança na VPS:
+
+- `POST /monitoring/security-event`: recebe eventos do Next.js e grava no NDJSON local e no Supabase separado.
+- `GET /admin/security/events`: lista eventos recentes para o Admin Master.
+- `POST /admin/security/cleanup`: aplica retenção no Supabase separado de segurança.
+
+Regra importante de IP: a VPS prioriza `payload.ip` e `payload.details.ip` para preencher a coluna `ip`. O IP da conexão Docker/proxy fica apenas como fallback, evitando que o Admin Master mostre `172.x.x.x` como IP principal.
+
+Retenção:
+
+- NDJSON local: `RETENTION_DAYS` e `MAX_NDJSON_LINES`.
+- Supabase separado de segurança: padrão de 90 dias, ajustável pelo payload `securityRetentionDays`.
 
 ## Desenvolvimento Local
 

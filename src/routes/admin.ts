@@ -4,11 +4,65 @@ import { config } from "../config.js";
 import { requireAdminToken } from "../lib/auth.js";
 import { compactAllNdjsonFiles, countBy, createJob, files, readNdjson } from "../lib/store.js";
 import { systemStatus } from "../lib/system.js";
+import { getSecuritySupabaseAdmin } from "../lib/supabase.js";
 import { extendTrial, processTrialAlerts, sendTrialAlertNow } from "../lib/trialAlerts.js";
 
 function limitFromQuery(request: FastifyRequest, fallback = 20, max = 100) {
   const query = request.query as { limit?: string } | undefined;
   return Math.min(Number(query?.limit || fallback), max);
+}
+
+function retentionDaysFromBody(body: unknown, fallback = 90) {
+  const value =
+    body && typeof body === "object"
+      ? Number((body as { securityRetentionDays?: unknown }).securityRetentionDays)
+      : NaN;
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(7, Math.min(value, 365));
+}
+
+async function cleanupSecurityEvents(body: unknown) {
+  const securitySupabase = getSecuritySupabaseAdmin();
+  if (!securitySupabase) {
+    return {
+      provider: "security-supabase",
+      configured: false,
+      deleted: null,
+      retentionDays: retentionDaysFromBody(body),
+    };
+  }
+
+  const retentionDays = retentionDaysFromBody(body);
+  const cutoff = new Date(
+    Date.now() - retentionDays * 24 * 60 * 60 * 1000
+  ).toISOString();
+  const table = config.securityEventsTable || "security_events";
+  const { count, error } = await securitySupabase
+    .from(table)
+    .delete({ count: "exact" })
+    .lt("criado_em", cutoff);
+
+  if (error) {
+    return {
+      provider: "security-supabase",
+      configured: true,
+      ok: false,
+      table,
+      error: error.message,
+      retentionDays,
+      cutoff,
+    };
+  }
+
+  return {
+    provider: "security-supabase",
+    configured: true,
+    ok: true,
+    table,
+    deleted: count || 0,
+    retentionDays,
+    cutoff,
+  };
 }
 
 export async function registerAdminRoutes(app: FastifyInstance) {
@@ -130,8 +184,32 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   app.post("/admin/cleanup", async (request, reply) => {
     if (!requireAdminToken(request, reply)) return;
     const result = compactAllNdjsonFiles();
-    const job = createJob("cleanup:manual", { result, requested: request.body || null }, "completed");
-    return reply.code(202).send({ ok: true, service: config.serviceName, job, result });
+    const securityResult = await cleanupSecurityEvents(request.body);
+    const job = createJob(
+      "cleanup:manual",
+      { result, securityResult, requested: request.body || null },
+      "completed"
+    );
+    return reply.code(202).send({
+      ok: true,
+      service: config.serviceName,
+      job,
+      result,
+      securityResult,
+    });
+  });
+
+  app.post("/admin/security/cleanup", async (request, reply) => {
+    if (!requireAdminToken(request, reply)) return;
+    const securityResult = await cleanupSecurityEvents(request.body);
+    const job = createJob(
+      "cleanup:security-events",
+      { securityResult, requested: request.body || null },
+      "completed"
+    );
+    return reply
+      .code(202)
+      .send({ ok: true, service: config.serviceName, job, securityResult });
   });
 
   app.post("/jobs/reports/generate", async (request, reply) => {
