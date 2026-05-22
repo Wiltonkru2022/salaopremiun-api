@@ -6,6 +6,17 @@ export const config = {
   version: process.env.APP_VERSION || "0.1.0",
   apiAdminToken: process.env.API_ADMIN_TOKEN || "",
   apiSecret: process.env.API_SECRET || "",
+  professionalJwtSecret:
+    process.env.PROFESSIONAL_JWT_SECRET ||
+    process.env.API_SECRET ||
+    process.env.API_ADMIN_TOKEN ||
+    "",
+  professionalRefreshSecret:
+    process.env.PROFESSIONAL_REFRESH_SECRET ||
+    process.env.PROFESSIONAL_JWT_SECRET ||
+    process.env.API_SECRET ||
+    process.env.API_ADMIN_TOKEN ||
+    "",
   cronSecret: process.env.CRON_SECRET || "",
   dataDir: process.env.DATA_DIR || "./data",
   maxNdjsonLines: Number(process.env.MAX_NDJSON_LINES || 500),

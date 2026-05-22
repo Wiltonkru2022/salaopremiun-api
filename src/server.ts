@@ -7,6 +7,7 @@ import { registerOperationRoutes } from "./routes/operations.js";
 import { registerClientAppRoutes } from "./routes/clientApp.js";
 import { registerPublicRoutes } from "./routes/public.js";
 import { registerProfessionalAppRoutes } from "./routes/professionalApp.js";
+import { registerProfessionalMobileApiRoutes } from "./routes/professionalMobileApi.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 
 export function buildServer() {
@@ -33,6 +34,7 @@ export function buildServer() {
   app.register(registerOperationRoutes);
   app.register(registerClientAppRoutes);
   app.register(registerProfessionalAppRoutes);
+  app.register(registerProfessionalMobileApiRoutes);
 
   return app;
 }
