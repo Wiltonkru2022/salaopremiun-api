@@ -94,6 +94,9 @@ function statusToAppointmentStatus(status: unknown) {
   const normalized = text(status).toLowerCase();
   if (["confirmado", "confirmada", "confirmed"].includes(normalized)) return "Confirmed";
   if (["em_atendimento", "em atendimento", "in_progress"].includes(normalized)) return "InProgress";
+  if (["atendido", "finalizado", "completed"].includes(normalized)) return "Completed";
+  if (["faltou", "no_show"].includes(normalized)) return "NoShow";
+  if (["cancelado", "cancelada", "canceled"].includes(normalized)) return "Canceled";
   if (["reservado_aguardando_pagamento", "aguardando_pagamento"].includes(normalized)) {
     return "WaitingPayment";
   }
@@ -146,11 +149,32 @@ function clientSummary(item: AnyRecord) {
   };
 }
 
+function appointmentDetail(item: AnyRecord) {
+  const cliente = nested(item.clientes);
+  const servico = nested(item.servicos);
+  return {
+    id: text(item.id),
+    date: text(item.data, 10),
+    timeStart: text(item.hora_inicio, 5),
+    timeEnd: text(item.hora_fim, 5),
+    status: statusToAppointmentStatus(item.status),
+    durationMinutes: numberValue(item.duracao_minutos),
+    notes: text(item.observacoes, 1000),
+    commandId: text(item.id_comanda),
+    clientId: text(item.cliente_id || cliente.id),
+    clientName: text(cliente.nome, 140) || "Cliente",
+    clientPhone: text(cliente.whatsapp || cliente.telefone, 40),
+    serviceId: text(item.servico_id || servico.id),
+    serviceName: text(servico.nome, 140) || "ServiÃ§o",
+    servicePrice: cents(servico.preco),
+  };
+}
+
 async function loadProfile(idProfissional: string, idSalao?: string) {
   const supabase = getAdminClient();
   let query = supabase
     .from("profissionais")
-    .select("id,nome,nome_exibicao,email,telefone,ativo,status,id_salao,tipo_profissional,saloes(id,nome,status)")
+    .select("id,nome,nome_exibicao,email,telefone,whatsapp,cpf,categoria,cargo,bio,foto_url,pix_tipo,pix_chave,notificacao_app_ativa,notificacao_email_ativa,ativo,status,id_salao,tipo_profissional,saloes(id,nome,status)")
     .eq("id", idProfissional)
     .limit(1);
 
@@ -170,6 +194,17 @@ async function loadProfile(idProfissional: string, idSalao?: string) {
     email: text(profissional.email, 180),
     phone: text(profissional.telefone, 40),
     active: profissional.ativo !== false && text(profissional.status).toLowerCase() !== "inativo",
+    displayName: text(profissional.nome_exibicao, 140),
+    category: text(profissional.categoria, 120),
+    role: text(profissional.cargo || profissional.tipo_profissional, 120),
+    cpf: text(profissional.cpf, 20),
+    whatsapp: text(profissional.whatsapp || profissional.telefone, 40),
+    photoUrl: text(profissional.foto_url, 500),
+    bio: text(profissional.bio, 1000),
+    pixType: text(profissional.pix_tipo, 40),
+    pixKey: text(profissional.pix_chave, 200),
+    appNotificationsEnabled: profissional.notificacao_app_ativa !== false,
+    emailNotificationsEnabled: profissional.notificacao_email_ativa !== false,
   };
 }
 
@@ -677,7 +712,7 @@ export async function registerProfessionalMobileApiRoutes(app: FastifyInstance) 
       .maybeSingle();
     throwIfSupabaseError(result.error, "Falha ao carregar agendamento");
     if (!result.data?.id) return reply.code(404).send({ ok: false, error: "Agendamento não encontrado." });
-    return result.data;
+    return appointmentDetail(asRecord(result.data));
   });
 
   app.patch("/api/profissional/agendamentos/:id", async (request, reply) => {
@@ -832,7 +867,20 @@ export async function registerProfessionalMobileApiRoutes(app: FastifyInstance) 
       .maybeSingle();
     throwIfSupabaseError(result.error, "Falha ao carregar cliente");
     if (!result.data?.id) return reply.code(404).send({ ok: false, error: "Cliente não encontrado." });
-    return result.data;
+    const item = asRecord(result.data);
+    return {
+      id: text(item.id),
+      name: text(item.nome, 140) || "Cliente",
+      socialName: text(item.nome_social, 140),
+      phone: text(item.telefone, 40),
+      whatsapp: text(item.whatsapp || item.telefone, 40),
+      email: text(item.email, 180),
+      cpf: text(item.cpf, 20),
+      birthDate: text(item.data_nascimento, 20),
+      address: [item.rua, item.numero, item.bairro, item.cidade, item.estado].map((value) => text(value, 120)).filter(Boolean).join(", "),
+      notes: text(item.observacoes, 1000),
+      status: text(item.status, 40) || "ativo",
+    };
   });
 
   app.patch("/api/profissional/clientes/:id", async (request, reply) => {
@@ -1018,7 +1066,28 @@ export async function registerProfessionalMobileApiRoutes(app: FastifyInstance) 
       .maybeSingle();
     throwIfSupabaseError(result.error, "Falha ao carregar comanda");
     if (!result.data?.id) return reply.code(404).send({ ok: false, error: "Comanda não encontrada." });
-    return result.data;
+    const item = asRecord(result.data);
+    const cliente = nested(item.clientes);
+    return {
+      id: text(item.id),
+      number: text(item.numero, 30),
+      clientName: text(cliente.nome, 140) || "Cliente não informado",
+      clientPhone: text(cliente.whatsapp || cliente.telefone, 40),
+      status: statusToCommandStatus(item.status),
+      subtotal: cents(item.subtotal),
+      discount: cents(item.desconto),
+      addition: cents(item.acrescimo),
+      total: cents(item.total),
+      notes: text(item.observacoes, 1000),
+      items: ((item.comanda_itens || []) as AnyRecord[]).map((row) => ({
+        id: text(row.id),
+        type: text(row.tipo_item || "item", 40),
+        description: text(row.descricao, 180),
+        quantity: numberValue(row.quantidade),
+        unitValue: cents(row.valor_unitario),
+        totalValue: cents(row.valor_total),
+      })),
+    };
   });
 
   app.post("/api/profissional/comandas/:id/itens", async (request, reply) => {
