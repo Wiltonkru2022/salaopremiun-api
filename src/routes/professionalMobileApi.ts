@@ -397,31 +397,20 @@ async function commandBelongsToSalon(idSalao: string, idComanda: string) {
 export async function registerProfessionalMobileApiRoutes(app: FastifyInstance) {
   app.post("/api/profissional/auth/login", async (request, reply) => {
     const body = asRecord(request.body);
-    const login = text(body.login || body.cpf || body.email || body.telefone, 180);
+    const cpf = text(body.cpf || body.login, 30).replace(/\D/g, "");
     const senha = text(body.senha || body.password, 300);
-    const cpf = login.replace(/\D/g, "");
-    if (!login || !senha) {
-      return reply.code(400).send({ ok: false, error: "Informe CPF, telefone ou e-mail e senha." });
+    if (cpf.length !== 11 || !senha) {
+      return reply.code(400).send({ ok: false, error: "Informe CPF e senha." });
     }
 
     const supabase = getAdminClient();
-    let acessoResult = await supabase
+    const acessoResult = await supabase
       .from("profissionais_acessos")
       .select("id,cpf,senha_hash,ativo,id_profissional")
-      .eq("cpf", cpf || login)
+      .eq("cpf", cpf)
       .eq("ativo", true)
       .limit(1)
       .maybeSingle();
-
-    if (!acessoResult.data && login.includes("@")) {
-      acessoResult = await supabase
-        .from("profissionais_acessos")
-        .select("id,cpf,senha_hash,ativo,id_profissional")
-        .eq("email", login.toLowerCase())
-        .eq("ativo", true)
-        .limit(1)
-        .maybeSingle();
-    }
 
     throwIfSupabaseError(acessoResult.error, "Falha ao validar acesso");
     const acesso = asRecord(acessoResult.data);
