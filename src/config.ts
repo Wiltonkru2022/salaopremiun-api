@@ -21,12 +21,13 @@ export const config = {
   dataDir: process.env.DATA_DIR || "./data",
   maxNdjsonLines: Number(process.env.MAX_NDJSON_LINES || 500),
   retentionDays: Number(process.env.RETENTION_DAYS || 7),
-  supabaseUrl: process.env.SUPABASE_URL || "",
-  supabaseAnonKey: process.env.SUPABASE_ANON_KEY || "",
-  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-  securitySupabaseUrl: process.env.SECURITY_SUPABASE_URL || "",
-  securitySupabaseServiceRoleKey:
-    process.env.SECURITY_SUPABASE_SERVICE_ROLE_KEY || "",
+  neonDatabaseUrl:
+    process.env.NEON_ADMIN_DATABASE_URL || process.env.NEON_DATABASE_URL || "",
+  securityNeonDatabaseUrl:
+    process.env.SECURITY_NEON_DATABASE_URL ||
+    process.env.NEON_ADMIN_DATABASE_URL ||
+    process.env.NEON_DATABASE_URL ||
+    "",
   securityEventsTable: process.env.SECURITY_EVENTS_TABLE || "security_events",
   asaasApiKey: process.env.ASAAS_API_KEY || "",
   asaasWebhookToken: process.env.ASAAS_WEBHOOK_TOKEN || "",
