@@ -7,7 +7,8 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "check": "npm run build",
+    "audit:no-supabase": "node scripts/no-supabase-runtime.mjs",
+    "check": "npm run audit:no-supabase && npm run build",
     "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
