@@ -1,39 +1,207 @@
-import { createClient } from "@supabase/supabase-js";
-import WebSocket from "ws";
 import { config } from "../config.js";
 
-export function getSupabaseAdmin() {
-  if (!config.supabaseUrl || !config.supabaseServiceRoleKey) {
-    return null;
-  }
+type QueryResult<T = unknown> = {
+  data: T | null;
+  error: { message: string; code?: string } | null;
+  count?: number | null;
+};
 
-  return createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
+type Filter = { column: string; op: string; value: unknown };
+type Order = { column: string; ascending?: boolean; nullsFirst?: boolean };
+type Mutation =
+  | { kind: "insert"; payload: unknown }
+  | { kind: "update"; payload: unknown }
+  | { kind: "delete" }
+  | { kind: "upsert"; payload: unknown; options?: { onConflict?: string; ignoreDuplicates?: boolean } };
+
+type ClientConfig = {
+  baseUrl: string;
+  token?: string;
+};
+
+function encodeFilterValue(value: unknown) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return `(${value.map((item) => String(item)).join(",")})`;
+  return String(value);
+}
+
+function createBuilder(clientConfig: ClientConfig, table: string) {
+  const filters: Filter[] = [];
+  const orders: Order[] = [];
+  let select = "*";
+  let mutation: Mutation | null = null;
+  let limitValue: number | undefined;
+  let rangeValue: [number, number] | undefined;
+  let singleMode: "single" | "maybeSingle" | null = null;
+  let countMode: string | undefined;
+  let headMode = false;
+
+  const builder: any = {
+    select(columns = "*", options?: { count?: string; head?: boolean }) {
+      select = columns;
+      countMode = options?.count;
+      headMode = options?.head === true;
+      return builder;
     },
-    realtime: {
-      transport: WebSocket as any,
+    insert(payload: unknown) {
+      mutation = { kind: "insert", payload };
+      return builder;
     },
-  });
+    update(payload: unknown) {
+      mutation = { kind: "update", payload };
+      return builder;
+    },
+    delete() {
+      mutation = { kind: "delete" };
+      return builder;
+    },
+    upsert(payload: unknown, options?: { onConflict?: string; ignoreDuplicates?: boolean }) {
+      mutation = { kind: "upsert", payload, options };
+      return builder;
+    },
+    eq(column: string, value: unknown) { filters.push({ column, op: "eq", value }); return builder; },
+    neq(column: string, value: unknown) { filters.push({ column, op: "neq", value }); return builder; },
+    gt(column: string, value: unknown) { filters.push({ column, op: "gt", value }); return builder; },
+    gte(column: string, value: unknown) { filters.push({ column, op: "gte", value }); return builder; },
+    lt(column: string, value: unknown) { filters.push({ column, op: "lt", value }); return builder; },
+    lte(column: string, value: unknown) { filters.push({ column, op: "lte", value }); return builder; },
+    like(column: string, value: unknown) { filters.push({ column, op: "like", value }); return builder; },
+    ilike(column: string, value: unknown) { filters.push({ column, op: "ilike", value }); return builder; },
+    is(column: string, value: unknown) { filters.push({ column, op: "is", value }); return builder; },
+    in(column: string, value: unknown[]) { filters.push({ column, op: "in", value }); return builder; },
+    contains(column: string, value: unknown) { filters.push({ column, op: "cs", value }); return builder; },
+    match(values: Record<string, unknown>) {
+      for (const [column, value] of Object.entries(values || {})) filters.push({ column, op: "eq", value });
+      return builder;
+    },
+    order(column: string, options?: { ascending?: boolean; nullsFirst?: boolean }) {
+      orders.push({ column, ascending: options?.ascending, nullsFirst: options?.nullsFirst });
+      return builder;
+    },
+    limit(value: number) { limitValue = value; return builder; },
+    range(from: number, to: number) { rangeValue = [from, to]; return builder; },
+    single() { singleMode = "single"; return builder; },
+    maybeSingle() { singleMode = "maybeSingle"; return builder; },
+    async then(resolve: (value: QueryResult<any>) => unknown, reject?: (reason: unknown) => unknown) {
+      try {
+        const params = new URLSearchParams();
+        params.set("select", select);
+        for (const filter of filters) {
+          params.append(filter.column, `${filter.op}.${encodeFilterValue(filter.value)}`);
+        }
+        if (orders.length) {
+          params.set(
+            "order",
+            orders
+              .map((item) => `${item.column}.${item.ascending === false ? "desc" : "asc"}${item.nullsFirst === true ? ".nullsfirst" : item.nullsFirst === false ? ".nullslast" : ""}`)
+              .join(",")
+          );
+        }
+        if (limitValue !== undefined) params.set("limit", String(limitValue));
+        if (rangeValue) {
+          params.set("offset", String(rangeValue[0]));
+          params.set("limit", String(Math.max(rangeValue[1] - rangeValue[0] + 1, 0)));
+        }
+
+        const headers: Record<string, string> = { Accept: "application/json" };
+        if (clientConfig.token) headers.Authorization = `Bearer ${clientConfig.token}`;
+        if (countMode) headers.Prefer = `count=${countMode}`;
+
+        let method = "GET";
+        let body: string | undefined;
+        if (mutation?.kind === "insert") {
+          method = "POST";
+          body = JSON.stringify(mutation.payload);
+          headers["Content-Type"] = "application/json";
+          headers.Prefer = [headers.Prefer, "return=representation"].filter(Boolean).join(",");
+        } else if (mutation?.kind === "upsert") {
+          method = "POST";
+          body = JSON.stringify(mutation.payload);
+          headers["Content-Type"] = "application/json";
+          const resolution = mutation.options?.ignoreDuplicates ? "resolution=ignore-duplicates" : "resolution=merge-duplicates";
+          headers.Prefer = [headers.Prefer, resolution, "return=representation"].filter(Boolean).join(",");
+          if (mutation.options?.onConflict) params.set("on_conflict", mutation.options.onConflict);
+        } else if (mutation?.kind === "update") {
+          method = "PATCH";
+          body = JSON.stringify(mutation.payload);
+          headers["Content-Type"] = "application/json";
+          headers.Prefer = [headers.Prefer, "return=representation"].filter(Boolean).join(",");
+        } else if (mutation?.kind === "delete") {
+          method = "DELETE";
+          headers.Prefer = [headers.Prefer, "return=representation"].filter(Boolean).join(",");
+        }
+
+        const url = `${clientConfig.baseUrl.replace(/\/$/, "")}/${encodeURIComponent(table)}?${params.toString()}`;
+        const response = await fetch(url, { method: headMode ? "HEAD" : method, headers, body });
+        const raw = headMode ? "" : await response.text();
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (!response.ok) {
+          const message = parsed?.message || parsed?.error || `Neon Data API HTTP ${response.status}`;
+          return resolve({ data: null, error: { message, code: parsed?.code }, count: null });
+        }
+
+        const contentRange = response.headers.get("content-range");
+        const count = contentRange?.includes("/") ? Number(contentRange.split("/").pop()) : null;
+        let data: any = parsed;
+        if (singleMode) {
+          const rows = Array.isArray(parsed) ? parsed : parsed == null ? [] : [parsed];
+          if (singleMode === "single" && rows.length !== 1) {
+            return resolve({ data: null, error: { message: `Esperado 1 registro; recebidos ${rows.length}.` }, count });
+          }
+          if (singleMode === "maybeSingle" && rows.length > 1) {
+            return resolve({ data: null, error: { message: `Esperado no maximo 1 registro; recebidos ${rows.length}.` }, count });
+          }
+          data = rows[0] ?? null;
+        }
+        return resolve({ data, error: null, count });
+      } catch (error) {
+        if (reject) return reject(error);
+        return resolve({ data: null, error: { message: error instanceof Error ? error.message : "Falha na Neon Data API." }, count: null });
+      }
+    },
+  };
+  return builder;
+}
+
+function createNeonDataApiClient(baseUrl: string, token?: string) {
+  const clientConfig = { baseUrl: baseUrl.trim(), token: token?.trim() || undefined };
+  return {
+    from(table: string) {
+      return createBuilder(clientConfig, table);
+    },
+    async rpc(fn: string, args: Record<string, unknown> = {}) {
+      try {
+        const headers: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json" };
+        if (clientConfig.token) headers.Authorization = `Bearer ${clientConfig.token}`;
+        const response = await fetch(`${clientConfig.baseUrl.replace(/\/$/, "")}/rpc/${encodeURIComponent(fn)}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(args),
+        });
+        const raw = await response.text();
+        const data = raw ? JSON.parse(raw) : null;
+        if (!response.ok) return { data: null, error: { message: data?.message || `Neon Data API HTTP ${response.status}`, code: data?.code } };
+        return { data, error: null };
+      } catch (error) {
+        return { data: null, error: { message: error instanceof Error ? error.message : "Falha no RPC Neon." } };
+      }
+    },
+    channel() {
+      const channel: any = { on() { return channel; }, subscribe(callback?: (status: string) => void) { callback?.("SUBSCRIBED"); return channel; } };
+      return channel;
+    },
+    async removeChannel() { return "ok"; },
+  };
+}
+
+export function getSupabaseAdmin() {
+  if (!config.neonDataApiUrl) return null;
+  return createNeonDataApiClient(config.neonDataApiUrl, config.neonDataApiToken);
 }
 
 export function getSecuritySupabaseAdmin() {
-  if (!config.securitySupabaseUrl || !config.securitySupabaseServiceRoleKey) {
-    return null;
-  }
-
-  return createClient(
-    config.securitySupabaseUrl,
-    config.securitySupabaseServiceRoleKey,
-    {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-      realtime: {
-        transport: WebSocket as any,
-      },
-    }
-  );
+  const url = config.securityNeonDataApiUrl || config.neonDataApiUrl;
+  const token = config.securityNeonDataApiToken || config.neonDataApiToken;
+  if (!url) return null;
+  return createNeonDataApiClient(url, token);
 }
